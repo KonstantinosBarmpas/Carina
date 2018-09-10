@@ -1,0 +1,271 @@
+#include <Wire.h>
+#include <ArduinoWiFi.h>
+
+//Arduino pin definitions      
+const int PIN_PWML = 9;    
+const int PIN_PWMR = 10;
+const int PIN_DIRL = 3;  
+const int PIN_DIRR = 4;  
+
+//Default motor speed (PWM value)
+int motorSpeed = 200; //Max=255
+//Default motor run time (in milliseconds).  
+double motorTime = 1000; //Goes forward 3cm with that time.
+
+//variables
+//unsigned long frequency=0;
+//int rock=0;
+
+//Arduino setup routine - runs once on powerup
+void setup(){
+   
+    //Set up the pin directions
+    pinMode(PIN_PWML, OUTPUT);
+    pinMode(PIN_PWMR, OUTPUT);
+    pinMode(PIN_DIRL, OUTPUT);
+    pinMode(PIN_DIRR, OUTPUT);
+    //pinMode(LED_BUILTIN, OUTPUT);
+    
+    //Set up the serial interface for debugging
+    Serial.begin(9600);
+    Serial.println("Hello from Carina");
+    
+    //Start the wifi connection
+    Wifi.begin();
+    Wifi.println(F("WebServer Server is up"));
+}
+
+//Arduino loop routine - runs continuously after setup
+void loop() {
+while(Wifi.available()){
+    webproc();  //Process wifi requests
+  }
+delay(500);  //If the connection breaks, wait and try again
+}
+ 
+void webproc() {
+  String command = Wifi.readStringUntil('/'); // read the first part of the URL (after arduino/)
+  //Serial.println("URL RECIEVED");
+  if (command == "web") {  // web is the url to access the webpage
+     command = Wifi.readStringUntil('/');
+
+    Wifi.println(F("HTTP/1.1 200 OK"));
+    Wifi.println(F("Content-Type: text/html"));
+    Wifi.println();
+    Wifi.println(F("<html>"));
+    Wifi.print(F("<body>"));
+    if (command!=""){
+          if (command=="stop"){   //stop the motors
+            analogWrite(PIN_PWML, 0);    
+            analogWrite(PIN_PWMR, 0);
+          }else if (command=="detect") //detect and print the result in the webpage.
+          
+          { 
+           
+           for (int i=0; i<2; i++){
+           dec();}
+          
+            
+          }else if (command=="l" or command=="f" or command=="r" or command=="b")  //rover has to move.
+          { 
+             Serial.println(F("got direction"));
+             movebug(command);
+          }
+  
+          }
+     }
+}
+
+
+void movebug(String& movement){
+double y,x; //variables for the correct time/
+int denominator; 
+
+String com=Wifi.readStringUntil('/');
+
+if (movement == "l"){
+      denominator=90;
+      digitalWrite(3, HIGH);  //Set the direction controls
+      digitalWrite(4, LOW);
+   }else if (movement == "r"){
+      denominator=90;
+      digitalWrite(3, LOW);
+      digitalWrite(4, HIGH);
+   }else if (movement == "f"){
+      denominator=3;
+      digitalWrite(3, HIGH);
+      digitalWrite(4, HIGH); 
+   }else{
+      denominator=3;
+      digitalWrite(3, LOW);
+      digitalWrite(4, LOW); }
+      
+     if (com=="ty"){ //onTouch just start the motors
+      analogWrite(PIN_PWML, motorSpeed);    
+      analogWrite(PIN_PWMR, motorSpeed); 
+     
+     }else{ //calculate desired time.
+      com=Wifi.readStringUntil('/');
+      x=com.toFloat();
+      y=x*(motorTime)/denominator;
+      analogWrite(PIN_PWML, motorSpeed);    
+      analogWrite(PIN_PWMR, motorSpeed);  
+      delay(y);                               //Run the motors for the specified time
+      analogWrite(PIN_PWML, 0);    
+      analogWrite(PIN_PWMR, 0);
+     }
+ 
+Wifi.print (F("rover's movement"));
+Wifi.print(F("</body>"));
+Wifi.println(F("</html>"));
+Wifi.print(DELIMITER); // very important to end the communication! 
+}
+
+void sensor (int pin_name, double voltage, int& rock, unsigned long& frequency,int len, double thr, bool& test1) //int pin_name, double voltage
+{
+byte prevVal,newVal,test;
+unsigned long sum=0;
+int i,rep=0;
+bool done;
+int k;
+unsigned long readingTime;
+unsigned long StartTime;
+long CurrentTime;
+byte Reading[len];
+
+    frequency=0;
+    rock=0;
+    StartTime=micros();  //finding reading + putting array time
+    Reading[0]=analogRead(pin_name)*(thr/1023.0);
+    CurrentTime=micros();
+    readingTime=CurrentTime-StartTime;
+    
+      for (int i=1; i<len; i++){  //get 400 samples
+         Reading[i]=analogRead(pin_name)*(thr/1023.0);
+      }
+
+while (test1==true and i<len){
+  if (Reading[i]>=45){
+    test1=false;
+  }
+  i++;
+}
+ 
+       i=0;
+       while (i<len){
+ 
+       for (int k=i; k<len; k++){ //finding 0 with rising next
+         if (Reading[k]<=voltage and Reading[k+1]>voltage){ 
+           StartTime=k*readingTime;
+            i=k+1;
+           break;}
+      }
+
+           if (i<len){ 
+            done=true;
+            newVal=Reading[i];
+            i++;
+          
+          while (done==true and i<len){
+           prevVal=newVal;
+             newVal=Reading[i];//take new voltage
+            if (prevVal<=voltage and newVal>voltage) //when we find again that the voltage passed through voltage rising keep that time. 
+             {
+               done=false;
+               rep++;
+               CurrentTime=i*readingTime;
+             sum=sum+CurrentTime-StartTime;
+                                         }
+                   i++;
+                  }
+        }
+             }
+
+
+  if (sum>0){
+    sum=sum/rep;
+    frequency=1000000/sum;
+  }else{
+   frequency=0;
+  }
+}
+
+
+void sensor1(int& rock, unsigned long& frequency)
+{ 
+    bool test=true;
+    sensor(0,50,rock,frequency,200,250,test);
+    if (frequency>=60 and frequency<=80){
+        rock=1;
+    }else if (frequency>=85 and frequency<=95){
+        rock=2;
+    }else if (frequency>=100 and frequency<=120){ 
+       rock=3;
+    }else if (frequency>=130 and frequency<=150){ 
+        rock=4;
+    }else{
+       long sum=0;
+       float k;
+       for (int i=1; i<=10; i++){
+       k=analogRead(A2)*(5.0/1023.0);
+       sum=sum+k;}
+       k=sum/10;
+
+   if (k>=3 and test==false){ 
+    rock=2;
+    frequency=113;
+    }else{
+      rock=0;
+    }
+
+}
+}
+
+void sensor2 (int& rock, unsigned long& frequency)
+{
+   bool test=true;
+   sensor(1,8,rock,frequency,300,10,test);
+   if (frequency>=260 and frequency<=280){
+       rock=5;
+    }else if (frequency>=420 and frequency<=450){
+       rock=6;
+    }else {
+       long sum=0;
+       float k;
+       for (int i=1; i<=10; i++){
+       k=analogRead(A2)*(5.0/1023.0);
+       sum=sum+k;}
+       k=sum/10;
+
+   if (k>=3){ 
+    rock=6;
+    frequency=40;
+   }else{
+      rock=0;
+      frequency=0;
+      }
+    }
+}
+
+void dec()
+{
+  int rock=0;
+  unsigned long frequency=0;                           
+  sensor1(rock,frequency);
+  if (rock==0){
+     sensor2(rock,frequency);}   
+          if (rock!=0){
+          Wifi.print(F("Frequency is:"));
+          Wifi.print (frequency);
+          Wifi.print(F(" Rock is:"));
+          Wifi.print (rock);
+          Wifi.print(F("</body>"));
+          Wifi.println(F("</html>"));
+          Wifi.print(DELIMITER); // very important to end the communication! 
+          }else{
+          Wifi.println(F("No rock"));
+          Wifi.print(F("</body>"));
+          Wifi.println(F("</html>"));
+          Wifi.print(DELIMITER); // very important to end the communication!
+          }
+}
